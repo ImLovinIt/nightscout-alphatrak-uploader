@@ -10,7 +10,6 @@ def main():
     # get last treatment bg check date
     try:
         ns_last_bgcheck_date = get_last_treatment_bgcheck_date(ns_header)
-        print("Last treatment BG Check date:", ns_last_bgcheck_date)
     except Exception as error:
             print("Error requesting from Nightscout:", error)
 
