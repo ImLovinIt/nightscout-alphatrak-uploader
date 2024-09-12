@@ -7,8 +7,8 @@ Script written in python to periodically upload Zoetis Alphatrak glucose data to
 The script takes the following environment variables
 | Variable                 | Description                                                                                                                | Example                                  | Required |
 |--------------------------|----------------------------------------------------------------------------------------------------------------------------|------------------------------------------|----------|
-| at_token                 | Zoetis Bearer Token (See below for details)                                                                                    | YGza5ertORghredgUOXAQw...(256 characters)    | X        |
-| at_petid                 | Pet ID                                                                                    | 12345                                       | X        |
+| at_token                 | Alphatrak Bearer Token (See below for details)                                                                                    | YGza5ertORghredgUOXAQw...(256 characters)    | X        |
+| at_petid                 | Alphatrak Pet ID (See below for details)                                                                                   | 12345                                       | X        |
 | ns_url                   | Hostname of the Nightscout instance with http:// or https:// and end with /                                                | https://nightscout.azurewebsites.net/    | X        |
 | ns_api_secret            | SHA1 Hash of Nightscout access toke                                                                                        | 162f14de46149447c3338a8286223de407e3b2fa | X        |
 | uploader_interval        | The time interval of running this script. Default to 30 mins.       | 30                                        |          |
