@@ -20,7 +20,7 @@ The script takes the following environment variables
 Enable `server side retry` to prevent rate-limiting errors for Azure Cosmos DB for MongoDB operations. Follow link below for details.
 https://learn.microsoft.com/en-us/azure/cosmos-db/mongodb/prevent-rate-limiting-errors  
 
-## Obtain Alphatrak API Bearer Token
+## Obtain Alphatrak API Bearer Token & PetID
 - Register and run your Alphatrak app on a mobile phone first.
 - Install a packet capture app on your mobile. eg. Http traffic capture for iOS. PCAPdroid for andriod.
 - Install the required certificate per the packet capture app instruction.
