@@ -13,7 +13,8 @@ def convert_mgdl_to_mmoll(x):
 # NS api v1
 # get last treatment Bg Check date.
 def get_last_treatment_bgcheck_date(header):
-    r=requests.get(ns_url+"api/v1/treatments.json?find[eventType][$eq]=BG Check&find[enteredBy][$eq]="+ns_uploder, headers=header)
+    #r=requests.get(ns_url+"api/v1/treatments.json?find[eventType][$eq]=BG Check&find[enteredBy][$eq]="+ns_uploder, headers=header)
+    r=requests.get(ns_url+"api/v1/treatments.json?count=1&find[eventType]=BG Check&find[enteredBy]=" + ns_uploder + "&find[created_at][$gte]=1970", headers=header,timeout=5)
     try:
         data = r.json()
         if data == []:
@@ -30,7 +31,7 @@ def get_last_treatment_bgcheck_date(header):
 
 # post treatment Bg Check
 def ns_post_treatment_bgcheck(entries_json,header,n): #entries tpye = a list of dicts
-    r=requests.post(ns_url+"api/v1/treatments", headers = header, json = entries_json)
+    r=requests.post(ns_url+"api/v1/treatments", headers = header, json = entries_json,timeout=5)
     if r.status_code == 200:
         print("Nightscout POST request", r.status_code , r.reason)
         print(n, "entries uploaded")
@@ -40,7 +41,7 @@ def ns_post_treatment_bgcheck(entries_json,header,n): #entries tpye = a list of 
 # ======================================================
 # get Alphatrak data
 def get_at_entries(header,body):
-    r=requests.post(at_url, headers=header, data=json.dumps(body))
+    r=requests.post(at_url, headers=header, data=json.dumps(body),timeout=5)
     try:
         data = r.json()
         print("Zoetis Response Status:" , r.status_code , r.reason)
