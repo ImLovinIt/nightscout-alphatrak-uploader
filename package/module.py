@@ -1,6 +1,5 @@
 from setup import *
-import requests
-import pprint
+import urllib3
 import json
 import datetime
 
@@ -13,40 +12,51 @@ def convert_mgdl_to_mmoll(x):
 # NS api v1
 # get last treatment Bg Check date.
 def get_last_treatment_bgcheck_date(header):
-    #r=requests.get(ns_url+"api/v1/treatments.json?find[eventType][$eq]=BG Check&find[enteredBy][$eq]="+ns_uploder, headers=header)
-    r=requests.get(ns_url+"api/v1/treatments.json?count=1&find[eventType]=BG Check&find[enteredBy]=" + ns_uploder + "&find[created_at][$gte]=1970", headers=header,timeout=5)
+    url = ns_url+"api/v1/treatments.json?count=1&find[eventType]=BG Check&find[enteredBy]=" + ns_uploder + "&find[created_at][$gte]=1970"
+    r = urllib3.request("GET", url=url,headers=header, retries=retries, timeout=timeout)
     try:
-        data = r.json()
+        data = json.loads(r.data)
         if data == []:
-            print("Nightscout request", r.status_code , r.reason)
-            print("no data")
+            print("Nightscout get last Bg Check date:", r.status, r.reason)
+            print("Last Bg Check date: no data")
             return "0"
         else:
-            print("Nightscout request", r.status_code , r.reason)
-            print("Last treatment BG Check date" , data[0]["created_at"])
+            print("Nightscout get last Bg Check date:", r.status , r.reason)
+            print("Last Bg Check date:" , data[0]["created_at"])
             return data[0]["created_at"]
-    except requests.JSONDecodeError:
+    except json.JSONDecodeError:
         content_type = r.headers.get('Content-Type')
         print("Failed. Content Type " + content_type)
 
 # post treatment Bg Check
 def ns_post_treatment_bgcheck(entries_json,header,n): #entries tpye = a list of dicts
-    r=requests.post(ns_url+"api/v1/treatments", headers = header, json = entries_json,timeout=5)
-    if r.status_code == 200:
-        print("Nightscout POST request", r.status_code , r.reason)
+    url = ns_url+"api/v1/treatments"
+    r = urllib3.request("POST", url=url,headers=header, json = entries_json, retries=retries, timeout=timeout)
+    if r.status == 200:
+        print("Nightscout POST treatment:", r.status , r.reason)
         print(n, "entries uploaded")
     else:
-        print("Nightscout POST request", r.status_code , r.reason, r.text)
+        print("Nightscout POST treatment:", r.status , r.reason)
 
 # ======================================================
 # get Alphatrak data
+def return_at_body():
+    at_body = {
+        "Todate": datetime.datetime.now().isoformat(timespec="seconds"),
+        "LanguageId": "7",
+        "FromDate": (datetime.datetime.now()-datetime.timedelta(days=365*4)).isoformat(timespec="seconds"),
+        "PetId": at_petid,
+    }
+    return at_body
+
+
 def get_at_entries(header,body):
-    r=requests.post(at_url, headers=header, data=json.dumps(body),timeout=5)
+    url = at_url
+    r = urllib3.request("POST", url=url,headers=header, json = json.dumps(body), retries=retries, timeout=timeout)
     try:
-        data = r.json()
-        print("Zoetis Response Status:" , r.status_code , r.reason)
-        # pprint.pprint(r.json(), compact=True)
-    except requests.JSONDecodeError:
+        data = json.loads(r.data)
+        print("Zoetis Response Status:" , r.status , r.reason)
+    except json.JSONDecodeError:
         content_type = r.headers.get('Content-Type')
         print("Failed. Content Type " , content_type)
     return data

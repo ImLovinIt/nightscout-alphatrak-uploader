@@ -15,7 +15,7 @@ def main():
 
     # get Zoetis Alphatrak data
     try:
-        at_data = get_at_entries(at_header,at_body)
+        at_data = get_at_entries(at_header, return_at_body())
         if at_data["StatusCode"] == 200:
             print("Alphatrak data received.")
     except Exception as error:

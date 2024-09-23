@@ -69,10 +69,6 @@ at_header = {"Authorization": "Bearer "+at_token,
              "Accept":"application/json",
              }
 
-at_body = {
-    "Todate": datetime.datetime.now().isoformat(timespec="seconds"),
-    "LanguageId": "7",
-    "FromDate": (datetime.datetime.now()-datetime.timedelta(days=365*4)).isoformat(timespec="seconds"),
-    "PetId": at_petid,
-}
-
+# urllib3 initialisation
+retries=5
+timeout=5
