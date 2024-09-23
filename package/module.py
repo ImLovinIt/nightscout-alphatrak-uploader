@@ -47,12 +47,13 @@ def return_at_body():
         "FromDate": (datetime.datetime.now()-datetime.timedelta(days=365*4)).isoformat(timespec="seconds"),
         "PetId": at_petid,
     }
+    # print("Alphatrak query todate:",at_body["Todate"])
     return at_body
 
 
 def get_at_entries(header,body):
     url = at_url
-    r = urllib3.request("POST", url=url,headers=header, json = json.dumps(body), retries=retries, timeout=timeout)
+    r = urllib3.request("POST", url=url,headers=header, body=json.dumps(body), retries=retries, timeout=timeout)
     try:
         data = json.loads(r.data)
         print("Zoetis Response Status:" , r.status , r.reason)
