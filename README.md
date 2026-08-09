@@ -27,6 +27,14 @@ The script takes the following environment variables.
 | `retries`              | Retries per API request.                           | `10`    |
 | `timeout`              | Timeout in seconds per retry.                      | `10`    |
 
+### Time zone
+The Alphatrak API takes plain wall clock times alongside a separate field naming
+the offset they are in, so the uploader reads the host's own time zone and sends
+both, the way the app does. A container with no `TZ` set runs on UTC, declares
+`+00:00` and sends UTC wall clocks, which is consistent and needs no
+configuration. Set `TZ` if you would rather the requests read in local time,
+for example `TZ=Australia/Sydney`.
+
 ## IMPORTANT for Azure free tier users
 Enable `server side retry` to prevent rate-limiting errors for Azure Cosmos DB for MongoDB operations. Follow link below for details.
 https://learn.microsoft.com/en-us/azure/cosmos-db/mongodb/prevent-rate-limiting-errors  

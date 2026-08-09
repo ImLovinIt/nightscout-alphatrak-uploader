@@ -89,17 +89,42 @@ def upload_treatment(treatments_json,header,n): #treatments type = a list of dic
 
 # ======================================================
 # get Alphatrak data
+# Built to match a capture of the app's own request, field for field and in the
+# same order.
+#
+# The API works in naive local wall clock plus a separately declared offset, so
+# the frame has to come from DateTimeOffset rather than from the timestamps.
+# astimezone() binds the host's own offset, which keeps the two in step: a
+# container left on UTC declares +00:00 and sends UTC wall clocks, one given a TZ
+# declares that zone. The previous body sent a naive now() and no offset at all,
+# leaving the server to guess. The wall clock values themselves are unchanged by
+# this, only the declaration is new.
+#
+# isoformat would append the offset to Todate and FromDate, which the app does
+# not do, so these are formatted by hand.
 def return_at_body():
+    now = datetime.datetime.now().astimezone()
+    # "+1000" -> "+10:00", and half hour zones such as +0930 come out right too
+    utc_offset = now.strftime("%z")
+    utc_offset = utc_offset[:3]+":"+utc_offset[3:]
+
     at_body = {
-        "Todate": datetime.datetime.now().isoformat(timespec="seconds"),
+        "PetId": at_petid,
+        # Empty asks for the whole window. This is the app's delta sync handle,
+        # and the uploader filters client side against Nightscout instead, so
+        # there is nothing to put here yet.
+        "LastcallAPItime": "",
         # The app sends "1". Where "7" came from is not recorded, and no capture
         # shows it. It most likely only selects the language of any text in the
         # response, but match the app rather than guess.
         "LanguageId": "1",
+        # Note the space separator and the space before the offset. The two
+        # fields below use "T" instead. That inconsistency is the app's.
+        "DateTimeOffset": now.strftime("%Y-%m-%d %H:%M:%S ")+utc_offset,
+        "Todate": now.strftime("%Y-%m-%dT%H:%M:%S"),
         # Two years, the window the app itself asks for. A timedelta rather than
         # replace(year=year-2) so a run on 29 February does not raise.
-        "FromDate": (datetime.datetime.now()-datetime.timedelta(days=365*2)).isoformat(timespec="seconds"),
-        "PetId": at_petid,
+        "FromDate": (now-datetime.timedelta(days=365*2)).strftime("%Y-%m-%dT%H:%M:%S"),
     }
     # print("Alphatrak query todate:",at_body["Todate"])
     return at_body
