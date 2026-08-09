@@ -92,7 +92,10 @@ def upload_treatment(treatments_json,header,n): #treatments type = a list of dic
 def return_at_body():
     at_body = {
         "Todate": datetime.datetime.now().isoformat(timespec="seconds"),
-        "LanguageId": "7",
+        # The app sends "1". Where "7" came from is not recorded, and no capture
+        # shows it. It most likely only selects the language of any text in the
+        # response, but match the app rather than guess.
+        "LanguageId": "1",
         "FromDate": (datetime.datetime.now()-datetime.timedelta(days=365*4)).isoformat(timespec="seconds"),
         "PetId": at_petid,
     }
