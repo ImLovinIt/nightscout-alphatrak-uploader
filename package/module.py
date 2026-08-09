@@ -96,7 +96,9 @@ def return_at_body():
         # shows it. It most likely only selects the language of any text in the
         # response, but match the app rather than guess.
         "LanguageId": "1",
-        "FromDate": (datetime.datetime.now()-datetime.timedelta(days=365*4)).isoformat(timespec="seconds"),
+        # Two years, the window the app itself asks for. A timedelta rather than
+        # replace(year=year-2) so a run on 29 February does not raise.
+        "FromDate": (datetime.datetime.now()-datetime.timedelta(days=365*2)).isoformat(timespec="seconds"),
         "PetId": at_petid,
     }
     # print("Alphatrak query todate:",at_body["Todate"])
