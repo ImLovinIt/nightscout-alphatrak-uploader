@@ -148,11 +148,17 @@ def get_at_entries(header,body):
         return None
     return data
 
-# GlucoseEntryDateTime carries no offset, so something has to decide what it means.
-# Reading it as UTC is what the code has always done, by appending "Z" to it, and
-# that is kept here so this change moves no data. It has not been checked against
-# a reading whose true wall clock time is known, and the vendor timestamp lesson
-# from the sibling uploader says do not assume: verify before trusting it.
+# GlucoseEntryDateTime carries no offset. It is UTC. Verified 2026-08-10: the
+# newest reading in a capture read 2026-08-08T16:11:00 at 14.1 mmol/L, and the
+# app showed that same reading at 02:11 on Sunday 9 August in Sydney, UTC+10.
+#
+# DateTimeOffset on the request does not affect this. Two captures taken seconds
+# apart, one declaring +10:00 and one +00:00, came back byte identical, so the
+# response is always in a fixed UTC frame regardless of what the client claims.
+#
+# The trap worth recording: the readings alone argued the opposite. Seven of the
+# newest eight fall at sensible waking hours read as local and only three do read
+# as UTC, so the plausible inference was the wrong one. Only the app settled it.
 def at_datetime_to_epoch_ms(value):
     try:
         parsed = datetime.datetime.fromisoformat(str(value))
