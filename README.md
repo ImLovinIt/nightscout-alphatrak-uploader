@@ -71,6 +71,17 @@ The uploader prints the rule in force at startup and reports how many readings i
 shifted on each run, because rewriting a timestamp on a medical record should
 never happen quietly.
 
+**The uploader cannot detect a clock fault, and will not warn you about one.** It
+only applies corrections you have configured by hand. The fault above ran for
+nearly five months before anyone noticed, and nothing in the data reliably reveals
+one: the vendor's own sync timestamp looks like a clue, but it is dominated by how
+long a reading sat unsynced, which can be months, so it raises far more false
+alarms than real ones.
+
+Check the meter's clock against a phone every so often. It is on the device screen
+and the comparison takes seconds. That is the only dependable control, and doing
+it monthly would have caught this in weeks.
+
 ## IMPORTANT for Azure free tier users
 Enable `server side retry` to prevent rate-limiting errors for Azure Cosmos DB for MongoDB operations. Follow link below for details.
 https://learn.microsoft.com/en-us/azure/cosmos-db/mongodb/prevent-rate-limiting-errors  
