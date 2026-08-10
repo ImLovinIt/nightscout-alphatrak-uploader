@@ -102,6 +102,21 @@ uploader_all_data = env_bool('uploader_all_data', False)
 # time, at or above fixed_at, and is left alone. That holds however many readings
 # fall either side.
 #
+# It has to be an explicit moment, and a boolean "the clock is fixed now" will not
+# do, though it reads as the friendlier option. This process keeps no state, so the
+# only implicit cutoff available is the time it started, and that moves on every
+# restart. Fix the clock in August, reboot the host in September, and every
+# correctly stamped reading in between is suddenly below the new cutoff and gets
+# shifted. Because the upsert keys on created_at those shifted copies do not replace
+# the good ones, they land beside them, so a routine reboot would quietly duplicate
+# weeks of the record at wrong times with nothing unusual in the logs.
+#
+# Nor can the boundary be recovered from the data. The only thing separating a
+# pre-fix reading from a post-fix one is that its stamp is early by the drift, which
+# is the very thing being determined. The vendor's own CreatedAt does not help
+# either: a short sync gap does prove a reading is post-fix, but readings here are
+# routinely synced months late, so most good ones are indistinguishable from bad.
+#
 # There is no switch to turn this off once the history is right, and there must not
 # be. The vendor keeps serving the original wrong timestamps forever, so disabling
 # the rule would write them straight back on the next full upload. The rule stays
