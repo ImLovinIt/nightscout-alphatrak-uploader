@@ -26,7 +26,9 @@ The script takes the following environment variables.
 | `uploader_all_data`    | Upload every available reading, not just new ones. | `False` |
 | `retries`              | Retries per API request.                           | `10`    |
 | `timeout`              | Timeout in seconds per retry.                      | `10`    |
-| `at_time_offsets`      | Correct a wrong meter clock. See below.            | unset   |
+| `at_clock_drift_minutes`  | Correct a wrong meter clock. See below.         | unset   |
+| `at_clock_drift_from`     | When the clock fault began.                     | unset   |
+| `at_clock_drift_fixed_at` | When you corrected the device clock.            | unset   |
 
 ### Correcting a wrong meter clock
 The meter keeps its own clock, and it can be wrong. Readings already synced carry
@@ -39,33 +41,62 @@ event type plus timestamp, the corrected copies end up sitting beside the wrong
 ones instead of replacing them. So the correction is applied here, on every run,
 which keeps one timestamp per reading and leaves repeated runs idempotent.
 
-```
-at_time_offsets=FROM..TO:+MINUTES
-```
-
-`FROM` and `TO` are UTC and are matched against the **meter's own uncorrected
-timestamp**, so a rule means the same thing on every run no matter what has
-already been uploaded. The range includes `FROM` and excludes `TO`. `MINUTES` is
-signed: a meter running slow, stamping readings earlier than they really happened,
-needs a positive value. Separate several rules with `;`, and they may not overlap.
-
-A worked example. A meter was found 8 hours 8 minutes slow, and the fault was
-dated by comparing readings either side of it, the morning routine having jumped
-from 08:24 to 00:00 overnight between 21 and 22 March:
+Three variables, all of them or none:
 
 ```
-at_time_offsets=2026-03-21..2026-08-09:+488
+at_clock_drift_minutes=488
+at_clock_drift_from=2026-03-21
+at_clock_drift_fixed_at=2026-08-10T21:00+10:00
 ```
 
-Three things to get right:
+`at_clock_drift_minutes` is signed. A meter running slow, stamping readings earlier
+than they really happened, needs a positive value.
 
-- **Date the fault, do not guess it.** Compare the hour of day before and after a
-  suspected onset. A device clock fault shows up as an abrupt shift in a routine
-  that was previously steady.
-- **Close the window** as soon as the device clock is fixed. An open ended
-  correction outlives the fault and starts shifting good readings.
-- **Delete the wrongly timed records once.** The correction stops new ones being
-  written, it cannot remove what is already stored.
+Both dates are matched against the **meter's own uncorrected timestamp**, so the
+rule means the same thing on every run no matter what has already been uploaded.
+The range includes `from` and excludes `fixed_at`. Naive values are read as UTC, or
+paste a local time with its offset as above, which is harder to get wrong.
+
+`fixed_at` is the right boundary, and it is provably the correct one. A reading
+taken before the fix is stamped earlier than it happened, so it falls below
+`fixed_at` and is corrected. A reading taken afterwards is stamped at its true
+time, so it falls at or above `fixed_at` and is left alone. That holds however many
+readings fall either side, so you do not have to avoid testing before you get round
+to fixing the clock.
+
+### The order matters
+**Record the drift before you reset the device clock.** Resetting it destroys the
+only evidence of how far out it was, permanently. Photograph the meter screen
+beside a phone showing the time.
+
+1. Compare the meter against a phone. This gives you `minutes`.
+2. Fix the device clock, and note the moment. This gives you `fixed_at`.
+3. Capture the readings and date the onset. This gives you `from`. The vendor never
+   changes a stored timestamp, so a capture taken afterwards still shows the fault.
+4. Check that the onset boundary implies roughly the drift you measured. If the two
+   disagree by more than an hour or so, the clock drifted gradually rather than
+   jumping, a flat correction is the wrong tool, and leaving the history alone is
+   the safer choice.
+5. Set the three variables and restart. Read the startup line and the per run count.
+6. Delete the wrongly timed records once. The correction stops new ones being
+   written, it cannot remove what is already stored.
+
+**Date the fault, do not guess it.** A clock fault shows up as an abrupt, lasting
+shift in a routine that was previously steady. Guessing `from` too early corrupts
+readings that were fine, and too late leaves wrong ones in place.
+
+### What is checked for you
+The uploader refuses to start if only some of the three are set, if the drift is
+zero, if `from` is not before `fixed_at`, or if **`fixed_at` is in the future**.
+That last one is the important guard: whoever types a drift has already fixed the
+device, so a future value means either the clock is not fixed yet or a local time
+was written without its offset and read as UTC, which is the easiest mistake to
+make here.
+
+There is deliberately **no switch to turn the correction off**. The vendor keeps
+serving the original wrong timestamps forever, so disabling the rule would write
+them straight back on the next full upload. The rule stays in your configuration
+permanently. What is bounded is the window, not the rule's life.
 
 The uploader prints the rule in force at startup and reports how many readings it
 shifted on each run, because rewriting a timestamp on a medical record should

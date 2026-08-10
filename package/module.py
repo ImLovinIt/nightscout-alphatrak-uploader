@@ -189,13 +189,15 @@ def at_datetime_to_epoch_ms(value):
         parsed = parsed.replace(tzinfo=datetime.timezone.utc)
     return round(parsed.timestamp()*1000)
 
-# Correct a wrong device clock, per the rules documented in setup.py. Matched on
-# the vendor's own uncorrected timestamp, so the same reading always lands on the
-# same corrected instant and repeated runs upsert instead of accumulating.
+# Correct a wrong device clock, per the rule documented in setup.py. Matched on the
+# vendor's own uncorrected timestamp, so the same reading always lands on the same
+# corrected instant and repeated runs upsert instead of accumulating.
 def apply_time_offset(epoch_ms):
-    for start, end, delta in at_time_offsets:
-        if start <= epoch_ms < end:
-            return epoch_ms + delta
+    if at_clock_drift is None:
+        return epoch_ms
+    start, fixed_at, delta = at_clock_drift
+    if start <= epoch_ms < fixed_at:
+        return epoch_ms + delta
     return epoch_ms
 
 # Not every row in BloodGlucose is a measurement of the animal. Both flags are

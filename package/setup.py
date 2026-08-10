@@ -78,70 +78,80 @@ uploader_all_data = env_bool('uploader_all_data', False)
 # reapplied on every run, so one timestamp per reading is the only thing
 # Nightscout ever sees and repeated runs stay idempotent.
 #
-# Format, one or more rules separated by semicolons:
+# Three variables, all or nothing:
 #
-#   at_time_offsets=FROM..TO:+MINUTES
+#   at_clock_drift_minutes    signed. Positive for a meter running slow, that is
+#                             one stamping readings earlier than they happened.
+#   at_clock_drift_from       when the fault began.
+#   at_clock_drift_fixed_at   when you corrected the device clock.
 #
-# FROM and TO are UTC and are matched against the VENDOR's own uncorrected
-# timestamp, never the corrected one, so a rule means the same thing on every run
-# regardless of what has already been uploaded. The interval is half open, FROM
-# included and TO excluded. MINUTES is signed: a meter running slow, stamping
-# readings earlier than they happened, needs a positive value.
+# Both dates are matched against the VENDOR's own uncorrected timestamp, never the
+# corrected one, so the rule means the same thing on every run regardless of what
+# has already been uploaded. The range includes from and excludes fixed_at.
 #
-# Worked example. An AlphaTrak 3 was found 8h08m slow on 2026-08-10. The fault was
-# dated to 2026-03-21 by comparing reading times either side of it, the morning
-# routine having jumped from 08:24 to 00:00 overnight:
+# Naive values are read as UTC. An offset is honoured, so a local wall clock can be
+# pasted in as is, which is less error prone than converting by hand:
 #
-#   at_time_offsets=2026-03-21..2026-08-09:+488
+#   at_clock_drift_minutes=488
+#   at_clock_drift_from=2026-03-21
+#   at_clock_drift_fixed_at=2026-08-10T21:00+10:00
 #
-# Close the window as soon as the device clock is fixed. An open ended correction
-# outlives the fault and silently shifts good readings.
-def _offset_bound(text, rule):
+# fixed_at is the right boundary and is provably so. A reading taken before the
+# fix, at true time T, is stamped T minus the drift, which is below T and so below
+# fixed_at, and is corrected. A reading taken after the fix is stamped at its true
+# time, at or above fixed_at, and is left alone. That holds however many readings
+# fall either side.
+#
+# There is no switch to turn this off once the history is right, and there must not
+# be. The vendor keeps serving the original wrong timestamps forever, so disabling
+# the rule would write them straight back on the next full upload. The rule stays
+# in the configuration permanently. What is bounded is the window, not its life.
+def env_utc_ms(name):
+    raw = env_str(name)
+    if raw is None:
+        return None
     try:
-        parsed = datetime.datetime.fromisoformat(text.strip())
-    except (TypeError, ValueError):
-        sys.exit("at_time_offsets: '" + text.strip() + "' is not an ISO date or "
-                 "datetime, in rule: " + rule)
-    # naive means UTC here, to match the vendor timestamps being compared against
+        parsed = datetime.datetime.fromisoformat(raw.strip())
+    except ValueError:
+        sys.exit(name + " must be an ISO date or datetime, for example 2026-03-21 "
+                 "or 2026-08-10T21:00+10:00. Got: " + raw)
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=datetime.timezone.utc)
     return round(parsed.timestamp()*1000)
 
 
-def parse_time_offsets(raw):
-    rules = []
-    if raw is None or raw.strip() == "":
-        return rules
-    for rule in raw.split(";"):
-        rule = rule.strip()
-        if rule == "":
-            continue
-        if ".." not in rule or ":" not in rule:
-            sys.exit("at_time_offsets: expected FROM..TO:+MINUTES, got: " + rule)
-        # rpartition, because an ISO datetime contains colons of its own
-        window, _, minutes = rule.rpartition(":")
-        frm, _, to = window.partition("..")
-        try:
-            delta = int(minutes.strip())
-        except ValueError:
-            sys.exit("at_time_offsets: minutes must be a whole number, got '"
-                     + minutes.strip() + "' in rule: " + rule)
-        start, end = _offset_bound(frm, rule), _offset_bound(to, rule)
-        if start >= end:
-            sys.exit("at_time_offsets: FROM must be before TO, in rule: " + rule)
-        rules.append((start, end, delta*60000))
+_drift_minutes = env_int('at_clock_drift_minutes')
+_drift_from = env_utc_ms('at_clock_drift_from')
+_drift_fixed_at = env_utc_ms('at_clock_drift_fixed_at')
 
-    # Overlapping windows would make the applied offset depend on rule order,
-    # which is not something to leave to chance in a medical record.
-    ordered = sorted(rules)
-    for earlier, later in zip(ordered, ordered[1:]):
-        if later[0] < earlier[1]:
-            sys.exit("at_time_offsets: windows overlap, so the offset applied "
-                     "would depend on rule order. Fix the ranges.")
-    return rules
+# A half configured correction is worse than none, so require the set or refuse.
+_drift_given = [n for n, v in (("at_clock_drift_minutes", _drift_minutes),
+                               ("at_clock_drift_from", _drift_from),
+                               ("at_clock_drift_fixed_at", _drift_fixed_at))
+                if v is not None]
+if _drift_given and len(_drift_given) < 3:
+    sys.exit("A clock drift correction needs all three of at_clock_drift_minutes, "
+             "at_clock_drift_from and at_clock_drift_fixed_at. Only these were set: "
+             + ", ".join(_drift_given))
 
-
-at_time_offsets = parse_time_offsets(env_str('at_time_offsets'))
+at_clock_drift = None
+if len(_drift_given) == 3:
+    if _drift_minutes == 0:
+        sys.exit("at_clock_drift_minutes is 0, which would correct nothing. Remove "
+                 "all three variables instead, or set the real drift.")
+    if _drift_from >= _drift_fixed_at:
+        sys.exit("at_clock_drift_from must be before at_clock_drift_fixed_at.")
+    # Whoever types a drift has already fixed the device, so the fix is in the past.
+    # A future value means either the clock is not fixed yet, in which case the
+    # correction should not be configured, or a local time was written without its
+    # offset and has been read as UTC, which is the likeliest typo of the three.
+    _now_ms = round(datetime.datetime.now(datetime.timezone.utc).timestamp()*1000)
+    if _drift_fixed_at > _now_ms:
+        sys.exit("at_clock_drift_fixed_at is in the future. Fix the device clock "
+                 "first, then set this to the moment you did it. If you meant a "
+                 "local time, include the offset, for example "
+                 "2026-08-10T21:00+10:00 rather than 2026-08-10T21:00.")
+    at_clock_drift = (_drift_from, _drift_fixed_at, _drift_minutes*60000)
 
 retries = env_int('retries', 10)
 timeout = env_int('timeout', 10)
@@ -152,15 +162,20 @@ if uploader_interval <= 0:
 # Say it out loud at startup. Rewriting the timestamp on a medical record is not
 # something that should ever happen quietly, and this is the one place a reader of
 # the logs can see the rule that is in force.
-for _start, _end, _delta in sorted(at_time_offsets):
-    print("Vendor clock correction active:",
-          datetime.datetime.fromtimestamp(_start/1000, datetime.timezone.utc)
-          .isoformat(timespec="minutes").replace("+00:00", "Z"),
-          "to",
-          datetime.datetime.fromtimestamp(_end/1000, datetime.timezone.utc)
-          .isoformat(timespec="minutes").replace("+00:00", "Z"),
-          "shifted by", str(round(_delta/60000)), "minute(s).",
-          "Readings outside that window are untouched.")
+if at_clock_drift is not None:
+    def _utc_text(ms):
+        return (datetime.datetime.fromtimestamp(ms/1000, datetime.timezone.utc)
+                .isoformat(timespec="minutes").replace("+00:00", "Z"))
+    print("Meter clock correction active. Readings the meter stamped from",
+          _utc_text(at_clock_drift[0]), "up to but not including",
+          _utc_text(at_clock_drift[1]), "are shifted by",
+          str(round(at_clock_drift[2]/60000)),
+          "minute(s). Everything outside that window is untouched.")
+    # A battery change can leave a clock years out, so a large drift is not wrong
+    # in itself. A tenfold typo is the thing worth a second look.
+    if abs(at_clock_drift[2]) > 48*3600000:
+        print("   Note: that drift is over 48 hours. Correct if the device clock was",
+              "reset, worth re-reading if it was meant to be a smaller number.")
 
 #API URL
 at_url = "https://alphatrakapi.zoetis.com/api/GetPetActivityByDateWiseList"
