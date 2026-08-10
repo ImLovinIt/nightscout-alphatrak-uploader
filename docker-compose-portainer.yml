@@ -19,13 +19,37 @@ services:
       ns_url: ${ns_url}
       ns_api_secret: ${ns_api_secret}
       # Optional. The uploader applies its own defaults, so leave these out
-      # unless you want to change one. Add the variable in Portainer first,
-      # otherwise the stack deploys with an empty value.
+      # unless you want to change one.
+      #
+      # A ${...} entry whose variable you have not defined in Portainer deploys as
+      # an EMPTY STRING, not as absent, and the uploader then falls back to its
+      # default. For the five below that is harmless. For anything where a missing
+      # value changes what gets written, it is not, so define the variable in
+      # Portainer first or use a literal.
       # uploader_interval: ${uploader_interval}
       # uploader_max_entries: ${uploader_max_entries}
       # uploader_all_data: ${uploader_all_data}
       # retries: ${retries}
       # timeout: ${timeout}
+      #
+      # Meter clock correction, if your device clock has been wrong. Read the
+      # README section before using it.
+      #
+      # Write these as LITERAL values, exactly as shown, not as ${...}
+      # substitutions. They are not secrets, so they do not need the indirection
+      # that keeps the token and API secret out of this file, and a ${...} that
+      # Portainer has no variable for arrives as an empty string. The uploader
+      # reads that as "no correction configured" and quietly uploads the device's
+      # raw timestamps, which is a silent data fault rather than a failure. Written
+      # as literals there is nothing for a deployment to drop.
+      #
+      # Substitute your own values. These are illustrative.
+      # at_clock_drift_minutes: "488"
+      # at_clock_drift_from: "2026-03-21"
+      # at_clock_drift_fixed_at: "2026-08-10T22:30+10:00"
+      #
+      # After deploying, check the logs for the line beginning "Meter clock
+      # correction active". If it is not there, the correction is not in force.
 
 # Deploying to a Swarm rather than standalone Docker? Swarm ignores restart: and
 # does not support container_name. Drop both and use this instead:
