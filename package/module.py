@@ -138,14 +138,35 @@ def get_at_entries(header,body):
     try:
         data = json.loads(r.data)
     except json.JSONDecodeError:
-        print("Zoetis response was not JSON.", r.status, r.reason,
-              "Content Type", r.headers.get('Content-Type'))
+        text = r.data[:300].decode("utf-8", "replace").strip()
+        # An expired token is not a 401 and is not JSON. Observed 2026-08-10: a
+        # 307 carrying the plain text "The session is no longer valid. Restart
+        # the application to continue." Neither the HTTP status nor the JSON
+        # StatusCode check below can see that, so match on it here.
+        if "session is no longer valid" in text.lower() or r.status in (301, 302, 307, 308, 401, 403):
+            print("Zoetis rejected the credentials:", r.status, r.reason, "|", text)
+            print("at_token has most likely expired. Capture a fresh one from the app.")
+        else:
+            print("Zoetis response was not JSON.", r.status, r.reason,
+                  "Content Type", r.headers.get('Content-Type'), "|", text)
+        return None
+
+    if not isinstance(data, dict):
+        print("Zoetis returned", type(data).__name__, "rather than an object.", r.status, r.reason)
+        return None
+
+    # The response carries its own success flags and messages beside the HTTP
+    # status. Surface them, otherwise a rejection reads as a bare "Data invalid".
+    if data.get("StatusCode") != 200 or data.get("IsSuccess") is False:
+        print("Zoetis Response Status:", r.status, r.reason,
+              "| StatusCode", data.get("StatusCode"), "| IsSuccess", data.get("IsSuccess"))
+        for field in ("DisplayMessage", "ExceptionMessage"):
+            if data.get(field):
+                print("   ", field+":", data[field])
+        print("Data invalid. Check your at_token and at_petid.")
         return None
 
     print("Zoetis Response Status:" , r.status , r.reason)
-    if data.get("StatusCode") != 200:
-        print("Data invalid. Check your at_token and at_petid.")
-        return None
     return data
 
 # GlucoseEntryDateTime carries no offset. It is UTC. Verified 2026-08-10: the
@@ -168,32 +189,128 @@ def at_datetime_to_epoch_ms(value):
         parsed = parsed.replace(tzinfo=datetime.timezone.utc)
     return round(parsed.timestamp()*1000)
 
+# Not every row in BloodGlucose is a measurement of the animal. Both flags are
+# present on every reading of the 2026-08-10 capture and were False throughout,
+# so this drops nothing today. A control solution test is a check of the meter
+# against a reference fluid, and posting one as a real BG Check would put a
+# reading in a medical record that never came from the patient.
+def at_reading_is_uploadable(item):
+    if item.get("ControlTest") is True:
+        return False, "control solution test"
+    if item.get("IsDeleted") is True:
+        return False, "deleted in the app"
+    return True, None
+
+# Nightscout wants "mmol" or "mg/dl" on a treatment, and the response states the
+# unit per reading, so read it rather than assume. All 473 readings of the
+# 2026-08-10 capture were UnitType "mmol/L", GlucoseUnitId 2. A mg/dL meter would
+# otherwise be posted as mmol and read low by a factor of 18.
+#
+# Only the mmol/L spelling and GlucoseUnitId 2 have been seen. The mg/dL id is
+# not guessed at, and the "mg/dl" string below has not been checked against a
+# live Nightscout, since no mg/dL account was available to test with.
+def at_units(item):
+    unit = str(item.get("UnitType") or "").strip().lower()
+    if unit in ("mmol/l", "mmol"):
+        return "mmol"
+    if unit in ("mg/dl", "mgdl"):
+        return "mg/dl"
+    if item.get("GlucoseUnitId") == 2:
+        return "mmol"
+    return None
+
+# GlucoseEntryDateTime has minute resolution, and Nightscout upserts a treatment
+# on eventType plus created_at, so two readings taken in the same minute collapse
+# into one and the earlier is lost with no warning. That is not hypothetical: the
+# 2026-08-10 capture held 473 readings on 471 distinct timestamps, losing 13.7 at
+# 2026-07-08T14:24 and 17.0 at 2026-01-19T03:48.
+#
+# Every reading in that capture carried :00 seconds, so the seconds slot is free
+# to disambiguate with. Order a collision by PetActivityId, which is unique
+# across the response, and push each reading after the first forward one second.
+# GDeviceSequenceNumber looks like the natural tiebreaker and is NOT unique, so
+# it cannot be used. The result is deterministic, which matters: an arbitrary
+# assignment would land on different timestamps each run and accumulate
+# duplicates rather than upserting.
+def resolve_reading_collisions(parsed): # parsed = a list of (epoch_ms, item)
+    by_time = {}
+    for epoch, item in parsed:
+        by_time.setdefault(epoch, []).append(item)
+
+    resolved = []
+    for epoch in sorted(by_time):
+        group = by_time[epoch]
+        if len(group) == 1:
+            resolved.append((epoch, group[0]))
+            continue
+        # None sorts last rather than raising against an int
+        group.sort(key=lambda x: (x.get("PetActivityId") is None, x.get("PetActivityId")))
+        if len(group) > 60:
+            print("Warning:", len(group), "readings share", to_ns_datestring(epoch),
+                  "so the nudge spills into the next minute.")
+        for n, item in enumerate(group):
+            resolved.append((epoch + n*1000, item))
+        print("Nudged", len(group)-1, "reading(s) sharing", to_ns_datestring(epoch),
+              "into the seconds slot, so none is lost to the upsert.")
+    return resolved
+
 # Process individual BG Check entries.
 # Catches per entry so one malformed reading does not discard the whole batch.
 def process_at_json_data_prepare_entries(list_data,last_date,list_dict):
-    count = 0
+    parsed = []
+    skipped = {}
+    unknown_units = 0
     for item in list_data:
-        if uploader_max_entries !=0 and count >= uploader_max_entries:
-            break
         try:
-            entry_date = at_datetime_to_epoch_ms(item["GlucoseEntryDateTime"])
+            uploadable, why = at_reading_is_uploadable(item)
+            if not uploadable:
+                skipped[why] = skipped.get(why, 0)+1
+                continue
+            entry_date = at_datetime_to_epoch_ms(item.get("GlucoseEntryDateTime"))
             if entry_date is None:
                 print("Skipping a reading with an unreadable GlucoseEntryDateTime:",
                       item.get("GlucoseEntryDateTime"))
+                skipped["unreadable timestamp"] = skipped.get("unreadable timestamp", 0)+1
                 continue
+            parsed.append((entry_date, item))
+        except Exception as error:
+            print("Error reading BloodGlucose entry:", error)
+
+    for why in sorted(skipped):
+        print("Skipped", skipped[why], "reading(s):", why)
+
+    # Collisions are resolved across every reading, before the date floor is
+    # applied, so a reading keeps the same timestamp whatever the floor happens
+    # to be on a given run.
+    count = 0
+    for entry_date, item in resolve_reading_collisions(parsed):
+        # Oldest first, so uploader_max_entries takes the oldest unsent readings
+        # rather than the newest. Taking the newest would advance the floor past
+        # everything older and skip those readings permanently.
+        if uploader_max_entries !=0 and count >= uploader_max_entries:
+            break
+        try:
             if entry_date>last_date or uploader_all_data==True:
+                units = at_units(item)
+                if units is None:
+                    units = "mmol"
+                    unknown_units += 1
                 entry_dict = {
                     "eventType": "BG Check",
                     "created_at": to_ns_datestring(entry_date),
                     "glucose": item["GlucoseLevel"],
                     "glucoseType": "Finger",
-                    "units": "mmol",
+                    "units": units,
                     "enteredBy": ns_uploder,
                 }
                 list_dict.append(entry_dict)
                 count +=1
         except Exception as error:
-            print("Error reading BloodGlucose entry:", error)
+            print("Error building BloodGlucose entry:", error)
+
+    if unknown_units:
+        print("Warning:", unknown_units, "reading(s) state no recognised unit.",
+              "Assuming mmol. Check UnitType and GlucoseUnitId in the response.")
     return list_dict
 
 
