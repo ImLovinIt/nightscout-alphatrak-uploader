@@ -186,6 +186,10 @@ It pulls the published image, restarts unless you stop it, and reads `.env`. To 
 
 Portainer substitutes those values into the `${...}` entries when it deploys and leaves the stack definition as written, so your token and API secret are not stored in the compose file itself.
 
+**A `${...}` entry with no matching Portainer variable deploys as an empty string, not as absent.** For the optional settings that is harmless, since the uploader falls back to its default. For a clock drift correction it is not: an empty value reads as "no correction configured" and the device's raw timestamps get uploaded, which is a silent data fault rather than a visible failure. Write those three as literal values in the stack instead. They are not secrets, so they gain nothing from the indirection, and a literal cannot be dropped.
+
+After any deploy, check the logs for the line beginning `Meter clock correction active`. If it is absent, the correction is not in force.
+
 Use that file rather than `docker-compose.yml`, which reads `env_file: .env`. A stack defined in the browser has no such file beside it.
 
 If a required variable is missing, the container exits with `at_token required. Pass it as an Environment Variable.` and the restart policy will keep retrying, so check the stack logs if it will not stay up.
