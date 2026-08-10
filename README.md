@@ -26,6 +26,50 @@ The script takes the following environment variables.
 | `uploader_all_data`    | Upload every available reading, not just new ones. | `False` |
 | `retries`              | Retries per API request.                           | `10`    |
 | `timeout`              | Timeout in seconds per retry.                      | `10`    |
+| `at_time_offsets`      | Correct a wrong meter clock. See below.            | unset   |
+
+### Correcting a wrong meter clock
+The meter keeps its own clock, and it can be wrong. Readings already synced carry
+whatever it said at the time, so setting the device right fixes future readings
+and repairs none of the history.
+
+Correcting the timestamps by hand in Nightscout does not hold either. The next run
+re-uploads the vendor's originals, and because Nightscout matches a treatment on
+event type plus timestamp, the corrected copies end up sitting beside the wrong
+ones instead of replacing them. So the correction is applied here, on every run,
+which keeps one timestamp per reading and leaves repeated runs idempotent.
+
+```
+at_time_offsets=FROM..TO:+MINUTES
+```
+
+`FROM` and `TO` are UTC and are matched against the **meter's own uncorrected
+timestamp**, so a rule means the same thing on every run no matter what has
+already been uploaded. The range includes `FROM` and excludes `TO`. `MINUTES` is
+signed: a meter running slow, stamping readings earlier than they really happened,
+needs a positive value. Separate several rules with `;`, and they may not overlap.
+
+A worked example. A meter was found 8 hours 8 minutes slow, and the fault was
+dated by comparing readings either side of it, the morning routine having jumped
+from 08:24 to 00:00 overnight between 21 and 22 March:
+
+```
+at_time_offsets=2026-03-21..2026-08-09:+488
+```
+
+Three things to get right:
+
+- **Date the fault, do not guess it.** Compare the hour of day before and after a
+  suspected onset. A device clock fault shows up as an abrupt shift in a routine
+  that was previously steady.
+- **Close the window** as soon as the device clock is fixed. An open ended
+  correction outlives the fault and starts shifting good readings.
+- **Delete the wrongly timed records once.** The correction stops new ones being
+  written, it cannot remove what is already stored.
+
+The uploader prints the rule in force at startup and reports how many readings it
+shifted on each run, because rewriting a timestamp on a medical record should
+never happen quietly.
 
 ## IMPORTANT for Azure free tier users
 Enable `server side retry` to prevent rate-limiting errors for Azure Cosmos DB for MongoDB operations. Follow link below for details.

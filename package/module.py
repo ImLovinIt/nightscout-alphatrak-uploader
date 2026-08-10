@@ -189,6 +189,15 @@ def at_datetime_to_epoch_ms(value):
         parsed = parsed.replace(tzinfo=datetime.timezone.utc)
     return round(parsed.timestamp()*1000)
 
+# Correct a wrong device clock, per the rules documented in setup.py. Matched on
+# the vendor's own uncorrected timestamp, so the same reading always lands on the
+# same corrected instant and repeated runs upsert instead of accumulating.
+def apply_time_offset(epoch_ms):
+    for start, end, delta in at_time_offsets:
+        if start <= epoch_ms < end:
+            return epoch_ms + delta
+    return epoch_ms
+
 # Not every row in BloodGlucose is a measurement of the animal. Both flags are
 # present on every reading of the 2026-08-10 capture and were False throughout,
 # so this drops nothing today. A control solution test is a check of the meter
@@ -260,6 +269,7 @@ def process_at_json_data_prepare_entries(list_data,last_date,list_dict):
     parsed = []
     skipped = {}
     unknown_units = 0
+    corrected = 0
     for item in list_data:
         try:
             uploadable, why = at_reading_is_uploadable(item)
@@ -272,12 +282,21 @@ def process_at_json_data_prepare_entries(list_data,last_date,list_dict):
                       item.get("GlucoseEntryDateTime"))
                 skipped["unreadable timestamp"] = skipped.get("unreadable timestamp", 0)+1
                 continue
-            parsed.append((entry_date, item))
+            # Correct the device clock before anything else looks at the time. The
+            # collision check below has to run on corrected values, because that is
+            # the space Nightscout keys the upsert on, and the date floor has to as
+            # well, because Nightscout already holds corrected times.
+            shifted = apply_time_offset(entry_date)
+            if shifted != entry_date:
+                corrected += 1
+            parsed.append((shifted, item))
         except Exception as error:
             print("Error reading BloodGlucose entry:", error)
 
     for why in sorted(skipped):
         print("Skipped", skipped[why], "reading(s):", why)
+    if corrected:
+        print("Corrected the device clock on", corrected, "of", len(list_data), "reading(s).")
 
     # Collisions are resolved across every reading, before the date floor is
     # applied, so a reading keeps the same timestamp whatever the floor happens
